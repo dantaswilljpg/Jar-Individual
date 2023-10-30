@@ -35,6 +35,7 @@ Esse é o meu JAR individual, onde nosso cliente, tem as todas essas opções
             System.out.println("13 - Ver todas informações de Instituição");
             
             System.out.println("14 - Sair");
+            
             System.out.println("-".repeat(15));
 
 
