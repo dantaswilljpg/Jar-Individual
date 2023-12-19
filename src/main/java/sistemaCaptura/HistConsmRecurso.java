@@ -4,95 +4,200 @@ import com.github.britooo.looca.api.core.Looca;
 import org.springframework.jdbc.core.BeanPropertyRowMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import sistemaCaptura.conexao.Conexao;
+import sistemaCaptura.log.metodos.Logs;
+import sistemaCaptura.slack.BotSlack;
 
-import javax.swing.*;
 import java.io.*;
-import java.net.HttpURLConnection;
-import java.net.URL;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.text.DecimalFormat;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
 
 public class HistConsmRecurso {
 
-    private Integer idHistorico;
     private LocalDateTime dataHora = LocalDateTime.now();
-    private Integer fkMaquina;
-    private Integer fkHardware;
-    private Integer fkComponente;
 
     Conexao conexao = new Conexao();
-    JdbcTemplate con = conexao.getConexaoDoBanco();
+    JdbcTemplate con = conexao.getConexaoDoBancoMySQL();
+    JdbcTemplate con2 = conexao.getConexaoDoBancoSQLServer();
     Looca looca = new Looca();
     Timer timer = new Timer();
+    Timer timer02 = new Timer();
+    List<Hardware> hardwares;
+
+    BotSlack botSlack = new BotSlack("xoxb-6077098544578-6249289926579-RibvLIN6DoAhk8q2nFVrsvVz", "C062962NFKM");
+    Logs logs = new Logs();
+    Integer qtdStrike = 0;
 
     public HistConsmRecurso() {
     }
 
-    public void mostrarHistorico() {
-        insertHistorico();
+    public void mostrarHistorico(Integer maquinaId, String nomeAula) {
+        MonitorarSoftware(maquinaId, nomeAula);
+        insertHistorico(maquinaId, nomeAula);
     }
+
     public void fecharSistema() {
         System.out.println("Sistema encerrado. Até mais!");
         System.exit(0);
     }
-    public void insertHistorico() {
+
+    public void insertHistorico(Integer maquinaId, String nomeAula) {
         timer.schedule(new TimerTask() {
             @Override
             public void run() {
-                // Obter os valores de consumo
-                Integer consumoCpu = (looca.getProcessador().getUso()).intValue();
-                Long consumoDisco = (long) (looca.getGrupoDeDiscos().getTamanhoTotal() / 8e+9);
+
+                double usoDouble = looca.getProcessador().getUso();
+                int consumoCpu = (int) Math.round(usoDouble);
+                double consumoRam = looca.getMemoria().getEmUso().doubleValue();
+                double consumoDisco = looca.getGrupoDeDiscos().getTamanhoTotal().doubleValue();
                 Integer qtdJanelasAbertas = looca.getGrupoDeJanelas().getTotalJanelas();
-                long consumoRam = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
                 dataHora = LocalDateTime.now();
+                List<Componente> componentes;
+                if (conexao.getDev()) {
+                    componentes = con.query("SELECT * FROM componente WHERE fkMaquina = ?",
+                            new BeanPropertyRowMapper<>(Componente.class), maquinaId);
+                } else {
+                    componentes = con2.query("SELECT * FROM componente WHERE fkMaquina = ?",
+                            new BeanPropertyRowMapper<>(Componente.class), maquinaId);
+                }
 
-                // Formatar a data/hora
-                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-                String dataHoraFormatada = dataHora.format(formatter);
+                if (componentes.size() >= 3) {
+                    String motivoComponentes = ":--SUCCESS: O sistema localizou os 3 componentes para ser monitorados)!";
+                    logs.adicionarMotivo(motivoComponentes);
 
-                // Inserir dados no banco
-                insertDadosNoBanco("CPU", consumoCpu);
-                insertDadosNoBanco("RAM", consumoRam);
-                insertDadosNoBanco("Disco", consumoDisco);
-                insertDadosNoBanco("Janelas Abertas", qtdJanelasAbertas);
+                    hardwares = con.query("SELECT * FROM hardware ",
+                            new BeanPropertyRowMapper<>(Hardware.class));
 
-                // Exibir dados em forma de tabela
-                mostrarDadosEmTabela(dataHoraFormatada, consumoCpu, consumoRam, consumoDisco, qtdJanelasAbertas);
+                    double Ram = 0.0;
+                    double bytes = consumoRam / 8.00;
+                    double gigabytes = bytes / (1024.0 * 1024 * 1024);
+                    double valorNormalizado = gigabytes / hardwares.get(1).getCapacidade();
+                    Ram = valorNormalizado * 100;
+                    double Disco = 0.0;
+                    double bytes2 = consumoDisco / 8.00;
+                    double gigabytes2 = bytes2 / (1024.0 * 1024 * 1024);
+                    double valorNormalizado2 = gigabytes2 / hardwares.get(2).getCapacidade();
+                    Disco = valorNormalizado2 * 100;
+                    DecimalFormat df = new DecimalFormat("#.##");
 
-//                 Verificar limite e enviar notificação por Slack
-                verificarLimiteEEnviarNotificacao("CPU", consumoCpu, 20); // Substitua 80 pelo limite desejado
-                verificarLimiteEEnviarNotificacao("RAM", consumoRam, 90); // Substitua 90 pelo limite desejado
-                verificarLimiteEEnviarNotificacao("Disco", consumoDisco, 70);
-                verificarLimiteEEnviarNotificacao("Quantidade janelas", qtdJanelasAbertas, 15); // Substitua 70 pelo limite desejado
+                    // Formatando o número com duas casas decimais
+                    double ramFormatada = Math.round(Ram * 100.0) / 100.0;
+                    double discoFormatada = Math.round(Disco * 100.0) / 100.0;
+                    insertDadosNoBanco(componentes.get(0).getIdComponente(), consumoCpu, maquinaId, componentes.get(0).getFkHardware());
+                    insertDadosNoBanco(componentes.get(1).getIdComponente(), ramFormatada, maquinaId, componentes.get(1).getFkHardware());
+                    insertDadosNoBanco(componentes.get(2).getIdComponente(), discoFormatada, maquinaId, componentes.get(2).getFkHardware());
+
+
+                    mostrarDadosEmTabela(consumoCpu, consumoRam, consumoDisco, qtdJanelasAbertas, hardwares.get(1), hardwares.get(2));
+
+
+                    try {
+                        verificarLimiteEEnviarNotificacao("CPU", consumoCpu, componentes.get(0).getMax(), hardwares.get(0));
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                    try {
+                        verificarLimiteEEnviarNotificacao("RAM", consumoRam, componentes.get(1).getMax(), hardwares.get(1));
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                    try {
+                        verificarLimiteEEnviarNotificacao("Disco", consumoDisco, componentes.get(2).getMax(), hardwares.get(2));
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                    try {
+                        verificarLimiteEEnviarNotificacao("Quantidade janelas", qtdJanelasAbertas, 15, hardwares.get(0));
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+
+                    Maquina maquina = obterMaquina(maquinaId);
+
+                    // Chamar a função para criar e gravar no arquivo
+                    logs.gerarLog(maquina, (long) consumoCpu, consumoRam, consumoDisco);
+                } else {
+                    String motivoComponentes = ":--ERROR: a maquina com o ID:(" + maquinaId + ") não possui 3 componentes para ser monitorados)!";
+                    logs.adicionarMotivo(motivoComponentes);
+                    fecharSistema();
+                }
+
             }
-        }, 1000, 1000);
+        }, 1000, 10000);
     }
 
-    private void insertDadosNoBanco(String componente, Number consumo) {
-        String unidade = componente.equals("RAM") ? " GB" : (componente.equals("Disco") ? " GB" : "");
-        double consumoConvertido = componente.equals("RAM") ? consumo.doubleValue() / (1024 * 1024 * 1024) : consumo.doubleValue();
+    private void insertDadosNoBanco(Integer componente, Number consumo, Integer numeroMaquina, Integer tipohardware) {
 
-        String sql = "INSERT INTO historico (dataHora, consumo, qtdJanelasAbertas, fkComponente, fkHardware, fkMaquina) VALUES(?, ?, ?, ?, ?, ?)";
-        con.update(sql, dataHora, consumoConvertido, looca.getGrupoDeJanelas().getTotalJanelas(), getComponenteId(componente), 2, 2);
-        System.out.println("Inserido no Banco de Dados - " + componente + ": " + consumoConvertido + unidade);
+        String sql = "INSERT INTO historico (dataHora, consumo,fkMaquina , fkHardware,fkComponente ) VALUES(?, ?, ?, ?, ?)";
+        con.update(sql, dataHora, consumo, numeroMaquina, tipohardware, componente);
+        con2.update(sql, dataHora, consumo, numeroMaquina, tipohardware, componente);
     }
 
-    private void mostrarDadosEmTabela(String dataHora, int consumoCpu, long consumoRam, long consumoDisco, int qtdJanelasAbertas) {
-        System.out.println("+---------------------+--------------+-----------------+-------------+----------------------+");
+    private void mostrarDadosEmTabela(int consumoCpu, double consumoRam, double consumoDisco, int qtdJanelasAbertas, Hardware hardware1, Hardware hardware2) {
+
+
+        double Ram = 0.0;
+        double bytes = consumoRam / 8.00;
+        double gigabytes = bytes / (1024.0 * 1024 * 1024);
+        double valorNormalizado = gigabytes / hardware1.getCapacidade();
+        Ram = valorNormalizado * 100;
+        double Disco = 0.0;
+        double bytes2 = consumoDisco / 8.00;
+        double gigabytes2 = bytes2 / (1024.0 * 1024 * 1024);
+        double valorNormalizado2 = gigabytes2 / hardware2.getCapacidade();
+        Disco = valorNormalizado2 * 100;
+
+
         System.out.println("| Data/Hora           | Consumo CPU  | Consumo RAM    | Consumo Disco | Janelas Abertas |");
         System.out.println("+---------------------+--------------+-----------------+-------------+----------------------+");
         System.out.print("| " + dataHora + " | " + consumoCpu + "%        | ");
-        System.out.print(consumoRam >= 0 ? consumoRam + " bytes  | " : "N/A             | ");
-        System.out.print(consumoDisco >= 0 ? consumoDisco + " GB  | " : "N/A             | ");
+        if (Ram > 0) {
+            System.out.print(String.format(" %.2f%%  |  ", Ram));
+        } else {
+            System.out.println("N/A             | ");
+        }
+        if (Disco > 0) {
+            System.out.print(String.format(" %.2f%%  |  ", Disco));
+        } else {
+            System.out.println("N/A             | ");
+        }
         System.out.println(qtdJanelasAbertas + " janelas abertas |");
         System.out.println("+---------------------+--------------+-----------------+-------------+----------------------+");
     }
 
-    private void verificarLimiteEEnviarNotificacao(String componente, Number consumo, int limite) {
-        if (consumo.intValue() >= limite) {
-            String mensagemAlerta = "O componente " + componente + " atingiu o limite de consumo: " + consumo + (componente.equals("RAM") ? " bytes" : " GB");
+    private void verificarLimiteEEnviarNotificacao(String componente, double consumo, int limite, Hardware hardware) throws IOException, InterruptedException {
+        final Boolean[] timeoutAtivo = {false};
+        double porcentagem = 0.0;
+        if (componente.equals("RAM")) {
+            double bytes = consumo / 8.00;
+            double gigabytes = bytes / (1024.0 * 1024 * 1024);
+            double valorNormalizado = gigabytes / hardware.getCapacidade();
+            porcentagem = valorNormalizado;
+        } else if (componente.equals("DISCO")) {
+            double bytes = consumo / 8.00;
+            double gigabytes = bytes / (1024.0 * 1024 * 1024);
+            double valorNormalizado = gigabytes / hardware.getCapacidade();
+            porcentagem = valorNormalizado;
+        } else {
+            porcentagem = consumo;
+        }
+
+        if (porcentagem >= limite) {
 
             if (componente.equals("CPU") || componente.equals("Janelas Abertas")) {
                 // Notificar o usuário no Java
@@ -100,64 +205,86 @@ public class HistConsmRecurso {
             }
 
             // Enviar notificação por Slack
-            enviarNotificacaoPorSlack(componente, consumo, limite);
-        }
-    }
-
-    public String obterSistemaOperacionalDaMaquina(JdbcTemplate con, Maquina maquina) {
-        String sql = "SELECT m.SO AS sistemaOperacional FROM maquina m WHERE m.idMaquina = ?";
-        return con.queryForObject(sql, String.class, maquina.getIdMaquina());
-    }
-
-    private void enviarNotificacaoPorSlack(String componente, Number consumo, int limite) {
-        try {
-            // Substitua com o seu webhook URL do Slack
-            String webhookUrl="https://hooks.slack.com/services/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2"; // Substitua pela sua URL
-
-            // Crie a mensagem que você deseja enviar em formato JSON
-            String mensagemSlack = "{\"text\": \"O componente " + componente + " atingiu o limite de consumo: " + consumo + (componente.equals("RAM") ? " bytes" : " GB") + "\"}";
-
-            // Crie uma conexão HTTP
-            URL url = new URL(webhookUrl);
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-            connection.setRequestMethod("POST");
-            connection.setRequestProperty("Content-Type", "application/json");
-            connection.setDoOutput(true);
-
-            // Escreva a mensagem no corpo da solicitação
-            try (OutputStream os = connection.getOutputStream(); Writer writer = new OutputStreamWriter(os, "UTF-8")) {
-                writer.write(mensagemSlack);
+            if (!timeoutAtivo[0]) {
+                timeoutAtivo[0] = true;
+                String mensagemSlack = "O componente " + componente + " atingiu/ultrapassou o limite estabelecido pelo ADM";
+                botSlack.enviarMensagem(mensagemSlack);
+                Timer timer = new Timer();
+                timer.schedule(new TimerTask() {
+                    @Override
+                    public void run() {
+                        timeoutAtivo[0] = false;
+                    }
+                }, 1000, 5000); // 5000 milissegundos = 5 segundos
             }
+        }
+    }
 
-            // Execute a solicitação
-            int responseCode = connection.getResponseCode();
-            if (responseCode == 200) {
-                System.out.println("Notificação por Slack enviada com sucesso.");
-            } else {
-                System.out.println("Falha ao enviar a notificação por Slack. Código de resposta: " + responseCode);
+
+    public void MonitorarSoftware(Integer idMaquina, String nomeAula) {
+        Timer timer = new Timer();
+        final Boolean[] strike = {false};
+        final String[] nomeUltimoProcesso = new String[1];
+        timer.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                try {
+                    String comando = (System.getProperty("os.name").toLowerCase().contains("win")) ? "tasklist" : "ps aux";
+
+                    ProcessBuilder processBuilder = new ProcessBuilder(comando);
+                    processBuilder.redirectErrorStream(true);
+                    Process process = processBuilder.start();
+
+                    BufferedReader busca = new BufferedReader(new InputStreamReader(process.getInputStream()));
+                    String linhaBusca;
+                    if (qtdStrike <= 2) {
+                        while ((linhaBusca = busca.readLine()) != null) {
+                            for (Maquina.Processo processo : obterProcessos(nomeAula)) {
+                                if (linhaBusca.contains(processo.getNomeAplicativo())) {
+                                    Maquina maquina = obterMaquina(idMaquina);
+
+                                    strike[0] = true;
+                                    System.out.println("Achou algo que nao devia");
+                                    nomeUltimoProcesso[0] = processo.getNomeAplicativo();
+
+                                    String mensagemSlack = "ALERT -- A maquina (" + maquina.getNome() + ") esta sendo utilizado de maneira indevida um dos processo que estava sendo utilizando: " + nomeUltimoProcesso[0] + " que é marcado como um dos processo não permitido";
+                                    System.out.println("Deu strike");
+                                    botSlack.enviarMensagem(mensagemSlack);
+                                    qtdStrike++;
+                                    if (qtdStrike == 2) {
+                                        mensagemSlack = "ALERT -- A maquina (" + maquina.getNome() + ") esta com 3 strikes cadastrados desde o começo da operação do sistema: essa mensagem sera enviada pelo slack e o aluno responsavel pela maquina será notificado. ";
+
+                                        botSlack.enviarMensagem(mensagemSlack);
+                                    }
+                                    LocalDateTime dataHora = LocalDateTime.now();
+                                    cadastrarStrike(idMaquina, dataHora);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
             }
-
-            // Feche a conexão
-            connection.disconnect();
-        } catch (Exception e) {
-            e.printStackTrace();
-            System.out.println("Falha ao enviar a notificação por Slack: " + e.getMessage());
-        }
+        }, 0000, 15000); // Inicia após 5 segundos e repete a cada 15 segundos
     }
 
-    private int getComponenteId(String componente) {
-        // Mapear o nome do componente para o seu ID correspondente no banco de dados
-        switch (componente) {
-            case "CPU":
-                return 1;
-            case "RAM":
-                return 2;
-            case "Disco":
-                return 3;
-            case "Janelas Abertas":
-                return 4;
-            default:
-                return 0; // Valor padrão, caso não corresponda a nenhum componente conhecido
-        }
+    private List<Maquina.Processo> obterProcessos(String nomeAula) {
+        return con2.query("SELECT idProcesso, nomeProcesso, nomeAplicativo FROM processo INNER JOIN permissaoProcesso ON idprocesso = fkProcesso WHERE fkPermissao=(SELECT idPermissao FROM permissao WHERE nome = ?)",
+                new BeanPropertyRowMapper<>(Maquina.Processo.class), nomeAula);
     }
+
+    private Maquina obterMaquina(Integer idMaquina) {
+        return con.queryForObject("SELECT * FROM maquina WHERE idMaquina = ?",
+                new BeanPropertyRowMapper<>(Maquina.class), idMaquina);
+    }
+
+    private void cadastrarStrike(Integer idMaquina, LocalDateTime dataHora) {
+        con.update("INSERT INTO strike (dataHora, validade, motivo, duracao, fkMaquina, fkSituacao) VALUES (?, ?, ?, ?, ?, ?);", dataHora, 1, "Uso indevido", 30, idMaquina, 1);
+        con2.update("INSERT INTO strike (dataHora, validade, motivo, duracao, fkMaquina, fkSituacao) VALUES (?, ?, ?, ?, ?, ?);", dataHora, 1, "Uso indevido", 30, idMaquina, 1);
+    }
+
+
 }

@@ -3,7 +3,7 @@ package sistemaCaptura;
 public class Maquina {
     private Integer idMaquina;
     private String nome;
-    private String SO; // Nome atualizado para corresponder ao banco de dados
+    private String SO;
     private Integer emUso;
     private Integer fkInstituicao;
     private String sistemaOperacional;
@@ -12,7 +12,7 @@ public class Maquina {
     public Maquina() {
     }
 
-    public Maquina(Integer idMaquina, String nome, String SO, Integer emUso, Integer fkInstituicao, String sistemaOperacional, String detalhes) {
+    public Maquina(Integer idMaquina, String nome, String os, Integer emUso, Integer fkInstituicao, String sistemaOperacional, String detalhes) {
         this.idMaquina = idMaquina;
         this.nome = nome;
         this.SO = SO;
@@ -21,6 +21,7 @@ public class Maquina {
         this.sistemaOperacional = sistemaOperacional;
         this.detalhes = detalhes;
     }
+
 
     public String getSistemaOperacional() {
         return sistemaOperacional;
@@ -33,6 +34,7 @@ public class Maquina {
     public String getDetalhes() {
         return detalhes;
     }
+
 
     public void setDetalhes(String detalhes) {
         this.detalhes = detalhes;
@@ -83,11 +85,54 @@ public class Maquina {
         return "Maquina{" +
                 "idMaquina='" + idMaquina + '\'' +
                 ", nome='" + nome + '\'' +
-                ", SO='" + SO + '\'' +
+                ", Sistema operacionak='" + SO + '\'' +
                 ", emUso=" + emUso +
                 ", fkInstituicao=" + fkInstituicao +
                 ", sistemaOperacional='" + sistemaOperacional + '\'' +
                 ", detalhes='" + detalhes + '\'' +
                 '}';
+    }
+
+    public static class Processo {
+        private Integer idProcesso;
+        private String nomeProcesso;
+        private String nomeAplicativo;
+
+        public Processo(){}
+        public Processo(Integer idProcesso, String nomeProcesso, String nomeAplicativo) {
+            this.idProcesso = idProcesso;
+            this.nomeProcesso = nomeProcesso;
+            this.nomeAplicativo = nomeAplicativo;
+        }
+
+
+        public Integer getIdProcesso() {
+            return idProcesso;
+        }
+
+        public void setIdProcesso(Integer idProcesso) {
+            this.idProcesso = idProcesso;
+        }
+
+        public String getNomeProcesso() {
+            return nomeProcesso;
+        }
+
+        public void setNomeProcesso(String nomeProcesso) {
+            this.nomeProcesso = nomeProcesso;
+        }
+
+        public String getNomeAplicativo() {
+            return nomeAplicativo;
+        }
+
+        public void setNomeAplicativo(String nomeAplicativo) {
+            this.nomeAplicativo = nomeAplicativo;
+        }
+
+        @Override
+        public String toString() {
+            return "Processo [idProcesso=" + idProcesso + ", nomeProcesso=" + nomeProcesso + ", nomeAplicativo=" + nomeAplicativo + "]";
+        }
     }
 }
